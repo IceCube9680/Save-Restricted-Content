@@ -1,4 +1,4 @@
-::: <div align="center">
+<div align="center">
 # 🚀 Telegram Downloader Bot
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
@@ -11,7 +11,7 @@ A powerful, modular Telegram bot for downloading **public & private
 Telegram content**\
 with persistent queue management, encrypted sessions, and
 enterprise‑ready architecture.
-:::
+
 
 ------------------------------------------------------------------------
 
@@ -204,4 +204,3 @@ MIT License
 Star the repository • Contribute • Share with others
 
 Built for reliability. Designed for scale.
-:::
