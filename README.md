@@ -1,4 +1,4 @@
-::: {align="center"}
+::: <div align="center">
 # 🚀 Telegram Downloader Bot
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
@@ -198,7 +198,7 @@ MIT License
 
 ------------------------------------------------------------------------
 
-::: {align="center"}
+<div align="center">
 ### 🌟 If you find this project useful:
 
 Star the repository • Contribute • Share with others
