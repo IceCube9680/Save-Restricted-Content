@@ -140,8 +140,10 @@ python bot.py
 # 🐳 Docker Deployment
 
 ``` bash
-docker-compose up -d
+sudo docker build -t src .
+sudo docker run -d --name src src
 ```
+
 
 Production-ready with volume persistence for logs, downloads, and
 backups.
