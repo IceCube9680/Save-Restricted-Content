@@ -133,7 +133,7 @@ class AuthorizationManager:
     async def require_auth(self, user_id: int, message: Union[Message, CallbackQuery]) -> bool:
         """Decorator-like function to require authentication"""
         if not await self.is_authorized(user_id):
-            from config import ERROR_MESSAGES
+            from plugins.core.constants import ERROR_MESSAGES
             error_text = ERROR_MESSAGES.get("access_denied", "⛔ Access Denied")
             
             if isinstance(message, Message):

@@ -725,6 +725,16 @@ class MongoDB:
             logger.error(f"Error getting backup history: {e}")
             return []
 
+    async def cleanup_old_backup_logs(self, days: int = 30) -> int:
+        """Clean up backup logs older than N days"""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            result = await self.db.backups.delete_many({"created_at": {"$lt": cutoff}})
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Error cleaning old backup logs: {e}")
+            return 0
+
     # ============== HEALTH CHECK ==============
 
     async def ping(self) -> bool:

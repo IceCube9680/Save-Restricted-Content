@@ -31,12 +31,13 @@ async def start_cleanup_scheduler(bot: Client):
             logger.info("🧹 Running periodic cleanup...")
 
             cleaned_files = await cleanup_old_files()
-            # cleaned_sessions = await db.cleanup_expired_sessions()   <-- REMOVE THIS LINE
             cleaned_logs = await db.cleanup_old_backup_logs(30)
 
-            ...
+            logger.info(f"🧹 Cleanup complete. Cleaned {cleaned_files} files, {cleaned_logs} backup logs.")
+        except asyncio.CancelledError:
+            break
         except Exception as e:
-            ...
+            logger.error(f"Error in cleanup scheduler: {e}", exc_info=True)
 
 
 async def cleanup_old_files(hours: int = None) -> int:
