@@ -104,8 +104,9 @@ class UserSessionManager:
                     return None
                 
                 # Get API credentials
-                api_id = int(await db.get_api_id(user_id))
-                api_hash = await db.get_api_hash(user_id)
+                db_api_id = await db.get_api_id(user_id)
+                api_id = int(db_api_id) if db_api_id is not None else API_ID
+                api_hash = await db.get_api_hash(user_id) or API_HASH
                 
                 # Decrypt session string
                 try:

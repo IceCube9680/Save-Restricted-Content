@@ -689,6 +689,18 @@ async def handle_login_steps(client: Client, message: Message):
 
     # --- Step 1: API ID ---
     if step == "api_id":
+        if text.lower() == "/skip":
+            from config import API_ID, API_HASH
+            state["api_id"] = API_ID
+            state["api_hash"] = API_HASH
+            state["step"] = "phone"
+            await message.reply_text(
+                "✅ **API ID & API HASH skipped!** Using default system credentials.\n\n"
+                "Please send your phone number which includes country code.\n"
+                "Example: `+13124562345`, `+9171828181889`"
+            )
+            return
+
         if not text.isdigit():
             await message.reply_text("❌ **Invalid API ID.** Must be a number.\n\nLogin cancelled.")
             del user_sessions[user_id]

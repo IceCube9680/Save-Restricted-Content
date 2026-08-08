@@ -27,21 +27,25 @@ class EncryptionManager:
         """Get encryption key from config or generate one"""
         if ENCRYPTION_KEY:
             try:
-                # Ensure key is properly formatted
+                # Test if key is directly valid for Fernet
                 key = ENCRYPTION_KEY.encode()
-                if len(key) != 32:
-                    # Derive a 32-byte key using PBKDF2
-                    salt = b'salt_'  # In production, use a random salt stored separately
+                Fernet(key)
+                return key
+            except Exception:
+                # If invalid, derive a proper 32-byte url-safe base64 key
+                try:
+                    salt = b'salt_'
                     kdf = PBKDF2HMAC(
                         algorithm=hashes.SHA256(),
                         length=32,
                         salt=salt,
                         iterations=100000,
                     )
-                    key = base64.urlsafe_b64encode(kdf.derive(key))
-                return key
-            except Exception as e:
-                logger.error(f"Error processing encryption key: {e}")
+                    key = base64.urlsafe_b64encode(kdf.derive(ENCRYPTION_KEY.encode()))
+                    Fernet(key)
+                    return key
+                except Exception as e:
+                    logger.error(f"Error deriving encryption key: {e}")
         
         # Generate a random key for development
         logger.warning("No encryption key set, generating random key")
