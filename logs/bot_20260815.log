@@ -1,0 +1,106 @@
+2026-08-15 21:26:12 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:26:12 - __main__ - CRITICAL - 💥 Fatal error: There is no current event loop in thread 'MainThread'.
+Traceback (most recent call last):
+  File "/home/icecube/ASUS/Save-Restricted-Content/bot.py", line 206, in main
+    bot = SaveRestrictedBot()
+  File "/home/icecube/ASUS/Save-Restricted-Content/bot.py", line 39, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        name="save_restricted_bot",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<9 lines>...
+        parse_mode=enums.ParseMode.MARKDOWN
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/pyrogram/client.py", line 267, in __init__
+    self.dispatcher = Dispatcher(self)
+                      ~~~~~~~~~~^^^^^^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/pyrogram/dispatcher.py", line 58, in __init__
+    self.loop = asyncio.get_event_loop()
+                ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/uvloop/__init__.py", line 206, in get_event_loop
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: There is no current event loop in thread 'MainThread'.
+2026-08-15 21:26:12 - __main__ - INFO - 🏁 Bot process ended
+2026-08-15 21:29:17 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:29:17 - __main__ - CRITICAL - 💥 Fatal error: There is no current event loop in thread 'MainThread'.
+Traceback (most recent call last):
+  File "/home/icecube/ASUS/Save-Restricted-Content/bot.py", line 206, in main
+    bot = SaveRestrictedBot()
+  File "/home/icecube/ASUS/Save-Restricted-Content/bot.py", line 39, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        name="save_restricted_bot",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<9 lines>...
+        parse_mode=enums.ParseMode.MARKDOWN
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/pyrogram/client.py", line 267, in __init__
+    self.dispatcher = Dispatcher(self)
+                      ~~~~~~~~~~^^^^^^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/pyrogram/dispatcher.py", line 58, in __init__
+    self.loop = asyncio.get_event_loop()
+                ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/icecube/ASUS/Save-Restricted-Content/venv/lib/python3.13/site-packages/uvloop/__init__.py", line 206, in get_event_loop
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: There is no current event loop in thread 'MainThread'.
+2026-08-15 21:29:17 - __main__ - INFO - 🏁 Bot process ended
+2026-08-15 21:29:48 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:29:48 - __main__ - INFO - 🚀 Starting Save Restricted Bot (MongoDB Edition)...
+2026-08-15 21:29:50 - database.mongodb - INFO - ✅ MongoDB indexes created successfully
+2026-08-15 21:29:50 - database.mongodb - INFO - ✅ Connected to MongoDB: save_restricted_bot
+2026-08-15 21:29:50 - __main__ - INFO - ✅ MongoDB connected successfully
+2026-08-15 21:29:55 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:29:55 - __main__ - INFO - 🚀 Starting Save Restricted Bot (MongoDB Edition)...
+2026-08-15 21:29:56 - __main__ - INFO - ✅ Bot started: @Sasfgvxjinfu_bot (ID: 8036269821)
+2026-08-15 21:29:56 - plugins.monitoring.health - INFO - Health monitoring started
+2026-08-15 21:29:57 - plugins.services.queue_manager - INFO - No pending queues to resume
+2026-08-15 21:29:57 - __main__ - INFO - 🎉 Bot started successfully! Uptime: 8s
+2026-08-15 21:29:58 - database.mongodb - INFO - ✅ MongoDB indexes created successfully
+2026-08-15 21:29:58 - database.mongodb - INFO - ✅ Connected to MongoDB: save_restricted_bot
+2026-08-15 21:29:58 - __main__ - INFO - ✅ MongoDB connected successfully
+2026-08-15 21:30:02 - __main__ - INFO - 👋 Received keyboard interrupt
+2026-08-15 21:30:02 - __main__ - INFO - 🛑 Shutting down bot...
+2026-08-15 21:30:02 - plugins.monitoring.health - INFO - Health monitoring stopped
+2026-08-15 21:30:02 - plugins.services.session_manager - INFO - Closing 0 active sessions...
+2026-08-15 21:34:12 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:34:12 - __main__ - INFO - 🚀 Starting Save Restricted Bot (MongoDB Edition)...
+2026-08-15 21:34:14 - database.mongodb - INFO - ✅ MongoDB indexes created successfully
+2026-08-15 21:34:14 - database.mongodb - INFO - ✅ Connected to MongoDB: save_restricted_bot
+2026-08-15 21:34:14 - __main__ - INFO - ✅ MongoDB connected successfully
+2026-08-15 21:34:20 - __main__ - INFO - ✅ Bot started: @Sasfgvxjinfu_bot (ID: 8036269821)
+2026-08-15 21:34:20 - plugins.monitoring.health - INFO - Health monitoring started
+2026-08-15 21:34:20 - plugins.services.queue_manager - INFO - No pending queues to resume
+2026-08-15 21:34:20 - __main__ - INFO - 🎉 Bot started successfully! Uptime: 7s
+2026-08-15 21:34:20 - root - INFO - Stop signal received (SIGINT). Exiting...
+2026-08-15 21:34:20 - __main__ - INFO - 🛑 Shutting down bot...
+2026-08-15 21:34:20 - plugins.monitoring.health - INFO - Health monitoring stopped
+2026-08-15 21:34:20 - plugins.services.session_manager - INFO - Closing 0 active sessions...
+2026-08-15 21:34:20 - root - INFO - Stop signal received (SIGINT). Exiting...
+2026-08-15 21:34:20 - database.mongodb - INFO - 🔌 Disconnected from MongoDB
+2026-08-15 21:34:20 - __main__ - INFO - 👋 Bot stopped. Goodbye!
+2026-08-15 21:34:20 - __main__ - INFO - 🏁 Bot process ended
+2026-08-15 21:34:56 - root - INFO - Stop signal received (SIGINT). Exiting...
+2026-08-15 21:34:56 - __main__ - INFO - 🛑 Shutting down bot...
+2026-08-15 21:34:56 - plugins.monitoring.health - INFO - Health monitoring stopped
+2026-08-15 21:34:56 - plugins.services.session_manager - INFO - Closing 1 active sessions...
+2026-08-15 21:34:56 - plugins.services.session_manager - INFO - Removed session for user 8728529759
+2026-08-15 21:34:56 - database.mongodb - INFO - 🔌 Disconnected from MongoDB
+2026-08-15 21:34:56 - __main__ - INFO - 👋 Bot stopped. Goodbye!
+2026-08-15 21:34:56 - __main__ - INFO - 🏁 Bot process ended
+2026-08-15 21:37:01 - __main__ - INFO - ⚡ uvloop event loop installed for high performance IO
+2026-08-15 21:37:01 - __main__ - INFO - 🚀 Starting Save Restricted Bot (MongoDB Edition)...
+2026-08-15 21:37:03 - database.mongodb - INFO - ✅ MongoDB indexes created successfully
+2026-08-15 21:37:03 - database.mongodb - INFO - ✅ Connected to MongoDB: save_restricted_bot
+2026-08-15 21:37:03 - __main__ - INFO - ✅ MongoDB connected successfully
+2026-08-15 21:37:09 - __main__ - INFO - ✅ Bot started: @Sasfgvxjinfu_bot (ID: 8036269821)
+2026-08-15 21:37:09 - plugins.monitoring.health - INFO - Health monitoring started
+2026-08-15 21:37:09 - plugins.services.queue_manager - INFO - No pending queues to resume
+2026-08-15 21:37:09 - __main__ - INFO - 🎉 Bot started successfully! Uptime: 7s
