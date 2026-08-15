@@ -12,7 +12,7 @@ from pyrogram import Client, enums
 from pyrogram.errors import FloodWait, WebpageCurlFailed
 from pyrogram.types import Message
 
-from config import UPLOAD_TIMEOUT, ENABLE_GLOBAL_CHANNEL, GLOBAL_CHANNEL_ID, ERROR_MESSAGE
+from config import UPLOAD_TIMEOUT, ENABLE_GLOBAL_CHANNEL, GLOBAL_CHANNEL_ID, ERROR_MESSAGE, UPDATE_INTERVAL
 from database.mongodb import db
 from plugins.core.models import FileTask, TaskStatus, BatchCancel, DownloadResult
 from plugins.core.utils import get_logger, safe_delete_file
@@ -78,8 +78,9 @@ class UploadService:
                         raise Exception("Task skipped")
                 
                 now = time.time()
-                if now - last_update < 0.5:
+                if now - last_update < UPDATE_INTERVAL:
                     return
+
                 
                 last_update = now
                 

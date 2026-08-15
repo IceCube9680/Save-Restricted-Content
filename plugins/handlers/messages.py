@@ -26,8 +26,9 @@ from config import (
     LOGIN_SYSTEM, STRING_SESSION, ERROR_MESSAGE, WAITING_TIME,
     CHANNEL_ID, ENABLE_GLOBAL_CHANNEL, GLOBAL_CHANNEL_ID,
     MAX_BATCH_SIZE, DOWNLOAD_TIMEOUT, UPLOAD_TIMEOUT, ADMINS,
-    LOG_CHANNEL
+    LOG_CHANNEL, UPDATE_INTERVAL
 )
+
 from database.mongodb import db
 from plugins.security.auth import auth_manager, is_authorized
 from plugins.security.encryption import encrypt_data
@@ -49,7 +50,8 @@ from plugins.handlers.callbacks import handle_progress_controls
 logger = get_logger(__name__)
 
 # Patch Pyrogram to support newer channel IDs
-utils.MIN_CHANNEL_ID = -1009999999999
+utils.MIN_CHANNEL_ID = -100999999999999
+
 
 # Global variables for batch processing
 batch_temp = type('BatchTemp', (), {'IS_BATCH': {}})()
@@ -725,53 +727,73 @@ def parse_telegram_link(link: str) -> Optional[LinkInfo]:
     info = LinkInfo()
     
     # Remove query parameters
-    link = link.split("?")[0]
+    link = link.split("?")[0].strip()
     
     # Split by /
-    parts = link.split("/")
+    parts = [p for p in link.split("/") if p]
     
     try:
-        if "https://t.me/c/" in link:
-            # Private channel
+        if "t.me/c/" in link:
+            # Private channel: e.g. https://t.me/c/1234567890/100 or https://t.me/c/1234567890/55/100
             info.type = "private"
-            info.source_id = f"-100{parts[4]}" if len(parts) > 4 else None
-            
-            # Get message IDs
-            range_part = parts[5] if len(parts) > 5 else "0"
-            range_parts = range_part.split("-")
-            
-            info.from_id = int(range_parts[0])
-            info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
-            
-        elif "https://t.me/b/" in link:
+            c_index = parts.index("c") if "c" in parts else -1
+            if c_index != -1 and len(parts) > c_index + 1:
+                info.source_id = f"-100{parts[c_index + 1]}"
+                
+                # Check for topic/thread ID (e.g., /c/channel_id/topic_id/msg_id)
+                if len(parts) >= c_index + 4 and parts[c_index + 2].isdigit():
+                    range_part = parts[c_index + 3]
+                elif len(parts) >= c_index + 3:
+                    range_part = parts[c_index + 2]
+                else:
+                    range_part = "0"
+                    
+                range_parts = range_part.split("-")
+                info.from_id = int(range_parts[0])
+                info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
+                
+        elif "t.me/b/" in link:
             # Bot message
             info.type = "bot"
-            info.bot_username = parts[4] if len(parts) > 4 else None
-            info.source_id = info.bot_username
-            
-            range_part = parts[5] if len(parts) > 5 else "0"
-            range_parts = range_part.split("-")
-            
-            info.from_id = int(range_parts[0])
-            info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
-            
-        elif "https://t.me/+" in link or "https://t.me/joinchat/" in link:
+            b_index = parts.index("b") if "b" in parts else -1
+            if b_index != -1 and len(parts) > b_index + 1:
+                info.bot_username = parts[b_index + 1]
+                info.source_id = info.bot_username
+                range_part = parts[b_index + 2] if len(parts) > b_index + 2 else "0"
+                range_parts = range_part.split("-")
+                info.from_id = int(range_parts[0])
+                info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
+                
+        elif "t.me/+" in link or "t.me/joinchat/" in link:
             # Join chat link
             info.type = "join_chat"
             info.invite_hash = parts[-1]
             
         else:
-            # Public channel/group
+            # Public channel/group: e.g. https://t.me/channel/100 or https://t.me/channel/55/100
             info.type = "public"
-            info.source_id = parts[3] if len(parts) > 3 else None
+            domain_index = -1
+            for idx, p in enumerate(parts):
+                if "t.me" in p or "telegram.me" in p:
+                    domain_index = idx
+                    break
             
-            range_part = parts[4] if len(parts) > 4 else "0"
-            range_parts = range_part.split("-")
-            
-            info.from_id = int(range_parts[0])
-            info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
-            
+            if domain_index != -1 and len(parts) > domain_index + 1:
+                info.source_id = parts[domain_index + 1]
+                
+                if len(parts) >= domain_index + 4 and parts[domain_index + 2].isdigit():
+                    range_part = parts[domain_index + 3]
+                elif len(parts) >= domain_index + 3:
+                    range_part = parts[domain_index + 2]
+                else:
+                    range_part = "0"
+                    
+                range_parts = range_part.split("-")
+                info.from_id = int(range_parts[0])
+                info.to_id = int(range_parts[1]) if len(range_parts) > 1 else info.from_id
+                
         return info
+
         
     except Exception as e:
         logger.error(f"Link parsing error: {e}")
@@ -914,8 +936,9 @@ async def handle_public_content(client: Client, source_id: str, task: FileTask, 
     """Handle public content download"""
     try:
         msg = await client.get_messages(source_id, task.msgid)
-        if msg.empty:
+        if not msg or msg.empty:
             return False
+
         
         await client.copy_message(chat_id, msg.chat.id, msg.id)
         
@@ -960,12 +983,9 @@ def create_mock_message(chat_id: int, user_id: int):
 
 
 async def cleanup_user_client(acc):
-    """Cleanup user client"""
-    if LOGIN_SYSTEM and acc:
-        try:
-            await acc.disconnect()
-        except:
-            pass
+    """Cleanup user client (no-op for pooled sessions managed by session_manager)"""
+    pass
+
 
 
 async def show_completion_message(client: Client, queue, saved: int, errors: int):
@@ -1031,10 +1051,17 @@ async def download_restricted(acc, client, message, msg, task, user_id):
     """Helper to download restricted content using user client but updating progress with bot client"""
     start_time = time.time()
     try:
+        last_update = 0
         async def progress(current, total):
+            nonlocal last_update
             if task and task.status == TaskStatus.CANCELLED:
                 raise pyrogram.StopTransmission
             
+            now = time.time()
+            if now - last_update < UPDATE_INTERVAL:
+                return
+            last_update = now
+
             # Update task
             task.update_progress(current, total)
             queue_manager.update_task_progress(user_id, current, total, "download")
@@ -1053,6 +1080,7 @@ async def download_restricted(acc, client, message, msg, task, user_id):
                 await progress_callback(current, total, client, prog_msg, "download", user_id)
             except Exception:
                 pass
+
 
         file_path = await acc.download_media(
             msg,
@@ -1095,8 +1123,9 @@ async def handle_private(
         try:
             # Get message from user client
             msg = await acc.get_messages(chatid, msgid)
-            if msg.empty:
+            if not msg or msg.empty:
                 return False
+
             
             # Get message type
             msg_type = get_message_type(msg)

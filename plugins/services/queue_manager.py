@@ -158,10 +158,16 @@ class QueueManager(ProgressManager):
         
         # Create new save task
         async def save_task():
-            await asyncio.sleep(delay)
-            await self._save_queue_state(user_id)
+            try:
+                await asyncio.sleep(delay)
+                await self._save_queue_state(user_id)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self.save_tasks.pop(user_id, None)
         
         self.save_tasks[user_id] = asyncio.create_task(save_task())
+
     
     async def _save_queue_state(self, user_id: int) -> None:
         """Save queue state to database"""

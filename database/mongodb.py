@@ -5,8 +5,9 @@ Pure MongoDB implementation without SQLAlchemy
 
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Union
+
 
 import motor.motor_asyncio
 from pymongo import IndexModel, ASCENDING, DESCENDING
@@ -113,7 +114,7 @@ class MongoDB:
                       last_name: str = None, phone: str = None) -> bool:
         """Add or update user in database"""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             user_data = {
                 "user_id": user_id,
@@ -185,7 +186,7 @@ class MongoDB:
     async def get_active_users_count(self, minutes: int = 30) -> int:
         """Get users active in last N minutes"""
         try:
-            cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
             return await self.db.users.count_documents({
                 "last_active": {"$gte": cutoff}
             })
@@ -198,7 +199,7 @@ class MongoDB:
         try:
             await self.db.users.update_one(
                 {"user_id": user_id},
-                {"$set": {"last_active": datetime.utcnow()}}
+                {"$set": {"last_active": datetime.now(timezone.utc)}}
             )
         except Exception as e:
             logger.error(f"Error updating user activity {user_id}: {e}")
@@ -215,7 +216,7 @@ class MongoDB:
                         "total_uploads": uploads,
                         "total_bandwidth": bandwidth
                     },
-                    "$set": {"updated_at": datetime.utcnow()}
+                    "$set": {"updated_at": datetime.now(timezone.utc)}
                 }
             )
         except Exception as e:
@@ -253,7 +254,7 @@ class MongoDB:
         try:
             result = await self.db.users.update_one(
                 {"user_id": user_id},
-                {"$set": {"is_banned": True, "updated_at": datetime.utcnow()}}
+                {"$set": {"is_banned": True, "updated_at": datetime.now(timezone.utc)}}
             )
             return result.modified_count > 0
         except Exception as e:
@@ -265,7 +266,7 @@ class MongoDB:
         try:
             result = await self.db.users.update_one(
                 {"user_id": user_id},
-                {"$set": {"is_banned": False, "updated_at": datetime.utcnow()}}
+                {"$set": {"is_banned": False, "updated_at": datetime.now(timezone.utc)}}
             )
             return result.modified_count > 0
         except Exception as e:
@@ -278,7 +279,7 @@ class MongoDB:
                           api_hash: str) -> None:
         """Save user session with no expiration (permanent)."""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             session_data = {
                 "user_id": user_id,
                 "session_string": session_string,
@@ -311,7 +312,7 @@ class MongoDB:
                 # Update last used timestamp
                 await self.db.sessions.update_one(
                     {"_id": session["_id"]},
-                    {"$set": {"last_used": datetime.utcnow()}}
+                    {"$set": {"last_used": datetime.now(timezone.utc)}}
                 )
                 return session.get("session_string")
             return None
@@ -355,7 +356,7 @@ class MongoDB:
     async def get_active_sessions(self) -> List[Dict[str, Any]]:
         """Get all active sessions"""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             cursor = self.db.sessions.find(
                 {
                     "is_valid": True,
@@ -377,7 +378,7 @@ class MongoDB:
     async def save_preferences(self, user_id: int, **kwargs) -> None:
         """Save user preferences"""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             # Handle file_filters serialization
             if "file_filters" in kwargs and isinstance(kwargs["file_filters"], dict):
@@ -505,7 +506,7 @@ class MongoDB:
     async def save_queue_state(self, user_id: int, state: Dict[str, Any]) -> None:
         """Save queue state"""
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             # Serialize metadata
             if "metadata" in state and isinstance(state["metadata"], dict):
@@ -607,7 +608,7 @@ class MongoDB:
         try:
             log_entry = {
                 "user_id": user_id,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 **kwargs
             }
 
@@ -662,11 +663,11 @@ class MongoDB:
     async def increment_stat(self, metric_name: str, value: int = 1) -> None:
         """Increment a statistic metric for today"""
         try:
-            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
             await self.db.statistics.update_one(
                 {"metric_name": metric_name, "date": today},
-                {"$inc": {"metric_value": value}, "$set": {"updated_at": datetime.utcnow()}},
+                {"$inc": {"metric_value": value}, "$set": {"updated_at": datetime.now(timezone.utc)}},
                 upsert=True
             )
 
@@ -676,7 +677,7 @@ class MongoDB:
     async def get_statistics(self, metric_name: str, days: int = 30) -> List[Dict[str, Any]]:
         """Get statistics for a metric over last N days"""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
             cursor = self.db.statistics.find(
                 {
@@ -703,7 +704,7 @@ class MongoDB:
                 "size": size,
                 "status": status,
                 "error": error,
-                "created_at": datetime.utcnow()
+                "created_at": datetime.now(timezone.utc)
             }
 
             await self.db.backups.insert_one(backup_log)
@@ -728,7 +729,7 @@ class MongoDB:
     async def cleanup_old_backup_logs(self, days: int = 30) -> int:
         """Clean up backup logs older than N days"""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             result = await self.db.backups.delete_many({"created_at": {"$lt": cutoff}})
             return result.deleted_count
         except Exception as e:

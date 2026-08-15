@@ -16,7 +16,10 @@ from pyrogram import Client, enums
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import API_ID, API_HASH, BOT_TOKEN, ADMINS, LOG_CHANNEL
+from config import (
+    API_ID, API_HASH, BOT_TOKEN, ADMINS, LOG_CHANNEL,
+    WORKERS, SLEEP_THRESHOLD, MAX_CONCURRENT_TRANSMISSIONS
+)
 from database.mongodb import init_db, close_db, db
 from plugins.monitoring.cleanup import start_cleanup_scheduler
 from plugins.monitoring.health import HealthMonitor
@@ -39,13 +42,14 @@ class SaveRestrictedBot(Client):
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
             plugins=dict(root="plugins/handlers"),
-            workers=20,
-            sleep_threshold=10,
-            max_concurrent_transmissions=3,
+            workers=WORKERS,
+            sleep_threshold=SLEEP_THRESHOLD,
+            max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
             ipv6=False,
             in_memory=True,
             parse_mode=enums.ParseMode.MARKDOWN
         )
+
         
         self.start_time = datetime.now()
         self.health_monitor = HealthMonitor(self)
@@ -184,11 +188,26 @@ def humanbytes(size: float) -> str:
 
 def main():
     """Main entry point"""
-    # Set up asyncio event loop policy for Windows
+    # Set up asyncio event loop policy for Windows or uvloop for Linux
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+    else:
+        try:
+            import uvloop
+            uvloop.install()
+            logger.info("⚡ uvloop event loop installed for high performance IO")
+        except ImportError:
+            pass
+
+    # Ensure an event loop exists on MainThread for Python 3.10+ / 3.13
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     bot = None
+
     try:
         # Create and start bot
         bot = SaveRestrictedBot()

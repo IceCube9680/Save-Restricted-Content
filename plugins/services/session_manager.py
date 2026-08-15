@@ -14,6 +14,7 @@ from pyrogram.errors import (
 
 from config import (
     API_ID, API_HASH, LOGIN_SYSTEM, STRING_SESSION,
+    WORKERS, SLEEP_THRESHOLD, MAX_CONCURRENT_TRANSMISSIONS
 )
 from database.mongodb import db
 from plugins.security.encryption import decrypt_data
@@ -45,7 +46,11 @@ class UserSessionManager:
                 session_string=STRING_SESSION,
                 in_memory=True,
                 no_updates=True,
+                workers=WORKERS,
+                sleep_threshold=SLEEP_THRESHOLD,
+                max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
             )
+
             logger.info("Global user client initialized")
         except Exception as e:
             logger.error(f"Failed to initialize global user client: {e}")
@@ -124,7 +129,11 @@ class UserSessionManager:
                     api_hash=api_hash,
                     in_memory=True,
                     no_updates=True,
+                    workers=WORKERS,
+                    sleep_threshold=SLEEP_THRESHOLD,
+                    max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
                 )
+
                 
                 # Test connection
                 try:

@@ -12,7 +12,7 @@ from pyrogram import Client
 from pyrogram.errors import FloodWait, FileIdInvalid, FileReferenceEmpty
 from pyrogram.types import Message
 
-from config import DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ERROR_MESSAGE
+from config import DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ERROR_MESSAGE, UPDATE_INTERVAL
 from database.mongodb import db
 from plugins.core.models import FileTask, TaskStatus, BatchCancel, DownloadResult
 from plugins.core.utils import (
@@ -87,8 +87,9 @@ class DownloadService:
                         raise Exception("Task skipped")
                 
                 now = time.time()
-                if now - last_update < 0.5:
+                if now - last_update < UPDATE_INTERVAL:
                     return
+
                 
                 last_update = now
                 
