@@ -7,7 +7,7 @@ import os
 import time
 import asyncio
 import random
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Union, List
 from datetime import datetime
 import pyrogram
 from plugins.handlers.commands import user_sessions, handle_login_steps
@@ -35,7 +35,8 @@ from plugins.security.encryption import encrypt_data
 from plugins.core.utils import (
     get_logger, humanbytes, time_formatter, get_ist_time,
     truncate_text, rate_limiter, get_downloads_dir,
-    safe_delete_file, validate_telegram_link
+    safe_delete_file, validate_telegram_link, ensure_directory,
+    sanitize_filename
 )
 from plugins.core.models import FileTask, TaskStatus, BatchCancel, LinkInfo, DownloadResult
 from plugins.core.animations import ProgressAnimations
@@ -819,9 +820,12 @@ async def process_batch(client: Client, user_id: int):
         logger.warning(f"No metadata for user {user_id}")
         return
     
+    source_type = queue.metadata.get("type")
+    source_id = queue.metadata.get("source_id")
+
     # Get user client
     acc = await get_user_client(user_id)
-    if not acc:
+    if not acc and source_type != "public":
         await client.send_message(
             queue.chat_id,
             "❌ **Connection Error**\n\n"
@@ -830,23 +834,22 @@ async def process_batch(client: Client, user_id: int):
         )
         return
     
-    try:
-        if not acc.is_connected:
-            await acc.start()
-    except Exception as e:
-        logger.error(f"Failed to start user client: {e}")
-        await client.send_message(
-            queue.chat_id,
-            f"❌ **Connection Error**\n\nFailed to start client: {e}"
-        )
-        batch_temp.IS_BATCH[user_id] = True
-        await cleanup_user_client(acc)
-        return
+    if acc:
+        try:
+            if not acc.is_connected:
+                await acc.start()
+        except Exception as e:
+            logger.error(f"Failed to start user client: {e}")
+            if source_type != "public":
+                await client.send_message(
+                    queue.chat_id,
+                    f"❌ **Connection Error**\n\nFailed to start client: {e}"
+                )
+                batch_temp.IS_BATCH[user_id] = True
+                await cleanup_user_client(acc)
+                return
 
     try:
-        source_type = queue.metadata.get("type")
-        source_id = queue.metadata.get("source_id")
-        
         saved = 0
         errors = 0
         
@@ -864,8 +867,8 @@ async def process_batch(client: Client, user_id: int):
             success = False
             try:
                 if source_type == "public":
-                    # Public content - can use bot directly
-                    success = await handle_public_content(client, source_id, task, queue.chat_id)
+                    # Public content - forward/copy or download/upload to target chat
+                    success = await handle_public_content(client, acc, source_id, task, queue.chat_id)
                 else:
                     # Private content - need user client
                     mock_msg = create_mock_message(queue.chat_id, user_id)
@@ -907,10 +910,6 @@ async def process_batch(client: Client, user_id: int):
                 "is_paused": queue.is_paused
             })
             
-            # Update progress display
-            # from plugins.progress_display import update_progress_display
-            # await update_progress_display(client, user_id, force=True)
-            
             # Wait between tasks
             await asyncio.sleep(WAITING_TIME)
         
@@ -932,37 +931,185 @@ async def get_user_client(user_id: int):
     else:
         return await session_manager.get_session(user_id)
 
-async def handle_public_content(client: Client, source_id: str, task: FileTask, chat_id: int) -> bool:
-    """Handle public content download"""
+async def handle_public_content(
+    client: Client,
+    acc: Optional[Client],
+    source_id: str,
+    task: FileTask,
+    chat_id: int
+) -> bool:
+    """Handle public content download and forward to target chat"""
+    user_id = task.from_user_id or chat_id
+    target_chat = await get_target_chat(user_id, chat_id)
+
     try:
-        msg = await client.get_messages(source_id, task.msgid)
+        # Fetch message using bot client first, fallback to user client if needed
+        msg = None
+        try:
+            msg = await client.get_messages(source_id, task.msgid)
+        except Exception as e:
+            logger.debug(f"Bot client failed to get public message: {e}")
+            if acc and getattr(acc, "is_connected", False):
+                msg = await fetch_message_safe(acc, source_id, task.msgid)
+
         if not msg or msg.empty:
+            if acc and getattr(acc, "is_connected", False):
+                msg = await fetch_message_safe(acc, source_id, task.msgid)
+
+        if not msg or msg.empty:
+            logger.warning(f"Public message {task.msgid} in {source_id} is empty or not found")
             return False
 
-        
-        await client.copy_message(chat_id, msg.chat.id, msg.id)
-        
-        # Update stats
-        if task.from_user_id:
+        msg_type = get_message_type(msg)
+        if not msg_type:
+            logger.warning(f"Unsupported message type for message {task.msgid}, fallback to Document")
+            msg_type = "Document"
+
+        if msg_type == "Service":
+            logger.info(f"Public message {task.msgid} is a service message, skipping")
+            return True
+
+        # Check user file filters
+        if not await check_file_filters(user_id, msg_type, msg):
+            logger.info(f"Public file {task.msgid} skipped by filter preferences")
+            return True
+
+        # Handle text messages
+        if msg_type == "Text":
+            return await handle_text_message(client, msg, target_chat, None)
+
+        # Check if user has custom caption or thumbnail
+        custom_caption = await db.get_caption(user_id)
+        custom_thumb = await db.get_thumbnail(user_id)
+        is_protected = getattr(msg, "has_protected_content", False)
+
+        # If not protected and no custom caption/thumb, try direct copy_message to target_chat
+        copied = False
+        if not is_protected and not custom_caption and not custom_thumb:
+            try:
+                await client.copy_message(target_chat, msg.chat.id, msg.id)
+                copied = True
+            except Exception as e:
+                logger.warning(f"copy_message to target_chat failed ({e}), falling back to download & upload for restricted content")
+                copied = False
+
+        if copied:
+            # Update user stats
             file_size = 0
             for media_type in ["document", "video", "audio", "photo", "voice", "animation", "sticker"]:
                 media = getattr(msg, media_type, None)
                 if media and hasattr(media, "file_size"):
                     file_size = media.file_size
                     break
-            
+
             await db.increment_user_stats(
-                task.from_user_id,
+                user_id,
                 downloads=1,
                 uploads=1,
                 bandwidth=file_size
             )
-        return True
-        
+
+            # Copy to global channel if enabled
+            if ENABLE_GLOBAL_CHANNEL and GLOBAL_CHANNEL_ID and int(GLOBAL_CHANNEL_ID) != target_chat:
+                try:
+                    await client.copy_message(int(GLOBAL_CHANNEL_ID), msg.chat.id, msg.id)
+                except Exception as e:
+                    logger.error(f"Global channel copy error: {e}")
+
+            return True
+
+        # OPEN RESTRICTED CHANNEL or Custom Preferences -> Download and Upload to target_chat
+        dl_client = acc if (acc and getattr(acc, "is_connected", False)) else client
+        mock_msg = create_mock_message(chat_id, user_id)
+
+        downloads_dir = get_downloads_dir()
+        ensure_directory(downloads_dir)
+        task_msg_id = getattr(task, 'message_id', 0) or 0
+        task_msgid = getattr(task, 'msgid', task.msgid) or task.msgid
+        raw_filename = generate_filename(msg, msg_type, task_msg_id, task_msgid)
+        clean_filename = sanitize_filename(raw_filename)
+        file_path = os.path.join(downloads_dir, clean_filename)
+
+        if task:
+            task.file_type = msg_type
+            task.file_name = clean_filename
+            task.file_path = file_path
+
+        download_result = await download_restricted(
+            dl_client, client, mock_msg, msg, task, user_id
+        )
+
+        # Retry if empty file
+        if download_result.success and os.path.exists(download_result.file_path) and os.path.getsize(download_result.file_path) == 0:
+            await safe_delete_file(download_result.file_path)
+            alt_client = client if dl_client == acc else (acc if (acc and getattr(acc, "is_connected", False)) else None)
+            if alt_client:
+                download_result = await download_restricted(
+                    alt_client, client, mock_msg, msg, task, user_id
+                )
+
+        if not download_result.success or not os.path.exists(download_result.file_path) or os.path.getsize(download_result.file_path) == 0:
+            if download_result.file_path and os.path.exists(download_result.file_path):
+                await safe_delete_file(download_result.file_path)
+            
+            # If error is because message doesn't contain downloadable media, send as text!
+            if "downloadable media" in str(download_result.error).lower():
+                logger.info(f"Public message {task.msgid} has no media file, sending as text message...")
+                return await handle_text_message(client, msg, target_chat, None)
+
+            if ERROR_MESSAGE:
+                await client.send_message(
+                    chat_id,
+                    f"❌ **Download Error (Msg {task.msgid}):** {download_result.error or 'Failed to download file'}"
+                )
+            return False
+
+        caption = await upload_service.get_user_caption(user_id, msg.caption)
+        thumb_path = await upload_service.get_user_thumbnail(user_id, client)
+        if not thumb_path:
+            try:
+                if msg_type == "Video" and msg.video and msg.video.thumbs:
+                    thumb_path = await dl_client.download_media(msg.video.thumbs[0].file_id)
+                elif msg_type == "Document" and msg.document and msg.document.thumbs:
+                    thumb_path = await dl_client.download_media(msg.document.thumbs[0].file_id)
+                elif msg_type == "Audio" and msg.audio and msg.audio.thumbs:
+                    thumb_path = await dl_client.download_media(msg.audio.thumbs[0].file_id)
+            except Exception as e:
+                logger.warning(f"Failed to download original thumb: {e}")
+
+        upload_result = await upload_service.upload_file(
+            client,
+            download_result.file_path,
+            msg,
+            msg_type,
+            target_chat,
+            None,
+            caption,
+            thumb_path,
+            task,
+            user_id
+        )
+
+        # Cleanup
+        await safe_delete_file(download_result.file_path)
+        if thumb_path:
+            await safe_delete_file(thumb_path)
+
+        if upload_result.success:
+            await db.increment_user_stats(
+                user_id,
+                downloads=1,
+                uploads=1,
+                bandwidth=download_result.file_size
+            )
+            return True
+        else:
+            return False
+
     except FloodWait:
         raise
     except Exception as e:
-        logger.error(f"Public content error: {e}")
+        logger.error(f"Public content error for msg {task.msgid}: {e}", exc_info=True)
         return False
 
 
@@ -1045,7 +1192,62 @@ Progress dashboard will close in 10 seconds...
             pass
 
 
-# ============== PRIVATE CONTENT HANDLER ==============
+# ============== PRIVATE & RESTRICTED CONTENT HANDLER ==============
+
+async def fetch_message_safe(acc: Client, chat_id: Union[int, str], msg_id: int) -> Optional[Message]:
+    """
+    Fetch message from user client with automatic peer resolution and dialog fallback.
+    Specifically handles private channels with strict protected content / noforwards.
+    """
+    # 1. Try direct get_messages
+    try:
+        msg = await acc.get_messages(chat_id, msg_id)
+        if msg and not msg.empty:
+            return msg
+    except Exception as e:
+        logger.debug(f"Direct get_messages failed for {chat_id}/{msg_id}: {e}")
+
+    # 2. Try resolving chat via get_chat
+    try:
+        await acc.get_chat(chat_id)
+        msg = await acc.get_messages(chat_id, msg_id)
+        if msg and not msg.empty:
+            return msg
+    except Exception as e:
+        logger.debug(f"get_chat failed for {chat_id}: {e}")
+
+    # 3. Iterate dialogs to populate in-memory peer cache
+    try:
+        logger.info(f"Resolving private chat peer for {chat_id} via dialogs...")
+        target_str = str(chat_id)
+        clean_target_id = target_str.replace("-100", "").lstrip("-")
+        
+        async for dialog in acc.get_dialogs(limit=300):
+            if not dialog.chat:
+                continue
+            d_id_str = str(dialog.chat.id)
+            if d_id_str == target_str or d_id_str.replace("-100", "").lstrip("-") == clean_target_id:
+                logger.info(f"Found and cached peer for {chat_id}: {dialog.chat.title or dialog.chat.id}")
+                break
+        
+        msg = await acc.get_messages(chat_id, msg_id)
+        if msg and not msg.empty:
+            return msg
+    except Exception as e:
+        logger.error(f"Dialog search failed for {chat_id}: {e}")
+
+    # 4. Try integer/channel variations if needed
+    try:
+        if isinstance(chat_id, str) and chat_id.startswith("-100"):
+            alt_id = int(chat_id)
+            msg = await acc.get_messages(alt_id, msg_id)
+            if msg and not msg.empty:
+                return msg
+    except Exception:
+        pass
+
+    return None
+
 
 async def download_restricted(acc, client, message, msg, task, user_id):
     """Helper to download restricted content using user client but updating progress with bot client"""
@@ -1063,7 +1265,8 @@ async def download_restricted(acc, client, message, msg, task, user_id):
             last_update = now
 
             # Update task
-            task.update_progress(current, total)
+            if task:
+                task.update_progress(current, total)
             queue_manager.update_task_progress(user_id, current, total, "download")
             
             # Update display using BOT client
@@ -1081,15 +1284,18 @@ async def download_restricted(acc, client, message, msg, task, user_id):
             except Exception:
                 pass
 
+        downloads_dir = get_downloads_dir()
+        ensure_directory(downloads_dir)
+        target_path = task.file_path if (task and task.file_path) else downloads_dir
 
         file_path = await acc.download_media(
             msg,
-            file_name=task.file_path,
+            file_name=target_path,
             progress=progress
         )
         
-        if not file_path:
-            return DownloadResult(False, error="Download failed")
+        if not file_path or not os.path.exists(file_path):
+            return DownloadResult(False, error="Download failed - file not created")
             
         return DownloadResult(
             True,
@@ -1112,42 +1318,66 @@ async def handle_private(
     msgid: int,
     task: Optional[FileTask] = None
 ) -> bool:
-    """Handle private/restricted content download"""
+    """Handle private/restricted content download with protected content support"""
     
     if task and task.status == TaskStatus.CANCELLED:
         return False
     
-    # Retry loop for FileReferenceExpired
+    # Retry loop for FileReferenceExpired and peer resolution
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Get message from user client
-            msg = await acc.get_messages(chatid, msgid)
+            # Get message from user client using robust safe fetcher
+            msg = await fetch_message_safe(acc, chatid, msgid)
             if not msg or msg.empty:
+                logger.warning(f"Private message {msgid} in chat {chatid} not found (attempt {attempt+1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                    continue
+                if ERROR_MESSAGE:
+                    await client.send_message(
+                        message.chat.id,
+                        f"❌ **Error:** Message `{msgid}` in chat `{chatid}` not accessible. Please ensure you have joined the channel with /login account."
+                    )
                 return False
 
-            
             # Get message type
             msg_type = get_message_type(msg)
             if not msg_type:
-                return False
+                logger.warning(f"Unsupported message type for message {msgid}, fallback to Document")
+                msg_type = "Document"
+
+            if msg_type == "Service":
+                logger.info(f"Message {msgid} is a service message, skipping")
+                return True
             
             # Check file filters
             if not await check_file_filters(message.from_user.id, msg_type, msg):
-                return False
+                logger.info(f"Message {msgid} skipped by filter preferences")
+                return True
             
             # Get target chat
             target_chat = await get_target_chat(message.from_user.id, message.chat.id)
             
+            # Ensure downloads directory and sanitize filename
+            downloads_dir = get_downloads_dir()
+            ensure_directory(downloads_dir)
+            task_msg_id = getattr(task, 'message_id', 0) or 0
+            task_msgid = getattr(task, 'msgid', msgid) or msgid
+            raw_filename = generate_filename(msg, msg_type, task_msg_id, task_msgid)
+            clean_filename = sanitize_filename(raw_filename)
+            file_path = os.path.join(downloads_dir, clean_filename)
+
             # Update task info
             if task:
                 task.file_type = msg_type
-                task.file_name = generate_filename(msg, msg_type, task.message_id, task.msgid)
-                task.file_path = os.path.join(get_downloads_dir(), task.file_name)
+                task.file_name = clean_filename
+                task.file_path = file_path
             
             # Handle text messages
             if msg_type == "Text":
-                return await handle_text_message(client, msg, target_chat, message.id)
+                reply_to = message.id if target_chat == message.chat.id else None
+                return await handle_text_message(client, msg, target_chat, reply_to)
             
             # Download file
             download_result = await download_restricted(
@@ -1161,21 +1391,25 @@ async def handle_private(
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)
                     continue
-                else: # if all retries failed.
+                else:
                     if ERROR_MESSAGE:
                         await client.send_message(
                             message.chat.id,
-                            "❌ **Download Error:** File is empty after retries.",
-                            reply_to_message_id=message.id
+                            "❌ **Download Error:** File is empty after retries."
                         )
                     return False
 
             if not download_result.success:
+                # If error is because message doesn't contain downloadable media, send as text!
+                if "downloadable media" in str(download_result.error).lower():
+                    logger.info(f"Message {msgid} has no media file, sending as text message...")
+                    reply_to = message.id if target_chat == message.chat.id else None
+                    return await handle_text_message(client, msg, target_chat, reply_to)
+
                 if ERROR_MESSAGE:
-                       await client.send_message(
+                    await client.send_message(
                         message.chat.id,
-                        f"❌ **Download Error:** {download_result.error}",
-                        reply_to_message_id=message.id
+                        f"❌ **Download Error (Msg {msgid}):** {download_result.error}"
                     )
                 return False
             
@@ -1192,7 +1426,7 @@ async def handle_private(
             
             if not thumb_path:
                 try:
-                    if msg_type == "Video" and msg.video and msg.video.thumbs:
+                    if msg_type in ["Video", "VideoNote"] and msg.video and msg.video.thumbs:
                         thumb_path = await acc.download_media(msg.video.thumbs[0].file_id)
                     elif msg_type == "Document" and msg.document and msg.document.thumbs:
                         thumb_path = await acc.download_media(msg.document.thumbs[0].file_id)
@@ -1202,13 +1436,14 @@ async def handle_private(
                     logger.warning(f"Failed to download original thumbnail: {e}")
             
             # Upload file
+            reply_to = message.id if target_chat == message.chat.id else None
             upload_result = await upload_service.upload_file(
                 client,
                 download_result.file_path,
                 msg,
                 msg_type,
                 target_chat,
-                message.id,
+                reply_to,
                 caption,
                 thumb_path,
                 task,
@@ -1247,7 +1482,9 @@ async def handle_private(
                     except Exception as e:
                         logger.error(f"Global channel upload error: {e}")
             
-            return upload_result.success
+                return True
+            else:
+                return False
             
         except FloodWait as e:
             logger.warning(f"FloodWait detected: {e.value}s")
@@ -1260,13 +1497,11 @@ async def handle_private(
                 await asyncio.sleep(1)
                 continue
             else:
-                # if FileReferenceExpired persists after the maximum retries.
                 logger.error("FileReferenceExpired persisted after retries.")
                 if ERROR_MESSAGE:
                     await client.send_message(
                         message.chat.id,
-                        "❌ **Error:** File reference expired and could not be refreshed.",
-                        reply_to_message_id=message.id
+                        "❌ **Error:** File reference expired and could not be refreshed."
                     )
                 return False
                 
@@ -1274,37 +1509,67 @@ async def handle_private(
             return False
             
         except Exception as e:
-            logger.error(f"Private content error: {e}", exc_info=True)
-            if ERROR_MESSAGE:
+            logger.error(f"Private content error for msg {msgid}: {e}", exc_info=True)
+            if attempt == max_retries - 1 and ERROR_MESSAGE:
                 await client.send_message(
                     message.chat.id,
-                    f"❌ **Error:** {str(e)[:200]}",
-                    reply_to_message_id=message.id
+                    f"❌ **Error (Msg {msgid}):** {str(e)[:200]}"
                 )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2)
+                continue
             return False
             
     return False
 
 
-def get_message_type(msg: Message) -> Optional[str]:
-    """Get message type"""
-    if msg.document:
+def get_message_type(msg: Message) -> str:
+    """Get message type with accurate text and media detection"""
+    if not msg or getattr(msg, "empty", False):
+        return "Unknown"
+    
+    if getattr(msg, "service", False):
+        return "Service"
+    
+    if getattr(msg, "document", None):
         return "Document"
-    elif msg.video:
+    elif getattr(msg, "video", None):
         return "Video"
-    elif msg.animation:
+    elif getattr(msg, "video_note", None):
+        return "VideoNote"
+    elif getattr(msg, "animation", None):
         return "Animation"
-    elif msg.sticker:
+    elif getattr(msg, "sticker", None):
         return "Sticker"
-    elif msg.voice:
+    elif getattr(msg, "voice", None):
         return "Voice"
-    elif msg.audio:
+    elif getattr(msg, "audio", None):
         return "Audio"
-    elif msg.photo:
+    elif getattr(msg, "photo", None):
         return "Photo"
-    elif msg.text:
-        return "Text"
-    return None
+    
+    media = getattr(msg, "media", None)
+    if media:
+        media_str = str(media).upper()
+        if "PHOTO" in media_str:
+            return "Photo"
+        elif "VIDEO_NOTE" in media_str:
+            return "VideoNote"
+        elif "VIDEO" in media_str:
+            return "Video"
+        elif "AUDIO" in media_str:
+            return "Audio"
+        elif "VOICE" in media_str:
+            return "Voice"
+        elif "ANIMATION" in media_str:
+            return "Animation"
+        elif "STICKER" in media_str:
+            return "Sticker"
+        elif "DOCUMENT" in media_str:
+            return "Document"
+    
+    # If not any downloadable media, it's Text
+    return "Text"
 
 
 async def check_file_filters(user_id: int, msg_type: str, msg: Message) -> bool:
@@ -1319,7 +1584,7 @@ async def check_file_filters(user_id: int, msg_type: str, msg: Message) -> bool:
             if file_name and file_name.lower().endswith((".zip", ".rar", ".7z", ".tar", ".gz")):
                 return filters_dict.get("zip", True)
             return filters_dict.get("document", True)
-        elif msg_type == "Video":
+        elif msg_type in ["Video", "VideoNote"]:
             return filters_dict.get("video", True)
         elif msg_type == "Audio":
             return filters_dict.get("audio", True)
@@ -1356,25 +1621,36 @@ async def get_target_chat(user_id: int, default_chat_id: int) -> int:
 async def handle_text_message(client: Client, msg: Message, target_chat: int, reply_id: int) -> bool:
     """Handle text message forwarding"""
     try:
+        text = msg.text or msg.caption or (msg.web_page.url if getattr(msg, "web_page", None) else "")
+        if not text:
+            logger.warning("Empty text message, skipping")
+            return True
+        entities = msg.entities or msg.caption_entities
+        logger.info(f"Sending text message ({len(text)} chars) to target_chat {target_chat} (reply_id={reply_id})...")
         sent_msg = await client.send_message(
             target_chat,
-            msg.text,
-            entities=msg.entities,
+            text,
+            entities=entities,
             reply_to_message_id=reply_id
         )
+        logger.info(f"✅ Text message successfully sent to target_chat {target_chat} (msg_id={sent_msg.id})")
         return True
     except Exception as e:
-        logger.error(f"Text message error: {e}")
+        logger.error(f"Text message error sending to target_chat {target_chat}: {e}")
         return False
 
 
 def generate_filename(msg: Message, msg_type: str, task_id: int, msgid: int) -> str:
-    """Generate filename for download"""
-    media = getattr(msg, msg_type.lower(), None) if msg_type != "Text" else None
+    """Generate sanitized filename for download"""
+    media = None
+    if msg_type not in ["Text", "VideoNote"]:
+        media = getattr(msg, msg_type.lower(), None)
+    elif msg_type == "VideoNote":
+        media = getattr(msg, "video_note", None)
     
     # Try to get original filename
     if media and hasattr(media, 'file_name') and media.file_name:
-        return media.file_name
+        return sanitize_filename(media.file_name)
     
     # Generate filename based on type
     timestamp = int(time.time())
@@ -1390,6 +1666,8 @@ def generate_filename(msg: Message, msg_type: str, task_id: int, msgid: int) -> 
         elif "webm" in mime:
             return f"video_{task_id}_{msgid}_{timestamp}.webm"
         return f"video_{task_id}_{msgid}_{timestamp}.mp4"
+    elif msg_type == "VideoNote":
+        return f"videonote_{task_id}_{msgid}_{timestamp}.mp4"
     elif msg_type == "Audio":
         mime = getattr(media, "mime_type", "") if media else ""
         if "ogg" in mime:

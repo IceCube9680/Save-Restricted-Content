@@ -106,6 +106,8 @@ class UploadService:
             if task:
                 task.status = TaskStatus.UPLOADING
             
+            logger.info(f"Uploading {os.path.basename(file_path)} ({humanbytes(file_size)}) as {msg_type} to target_chat {target_chat} (reply_to={reply_to_id})...")
+
             # Upload based on message type
             sent_msg = await self._upload_by_type(
                 client, msg_type, file_path, target_chat,
@@ -117,18 +119,7 @@ class UploadService:
             if sent_msg:
                 # Update metrics
                 usage_stats.increment("total_uploads")
-                
-                # Forward to global channel if enabled
-                if ENABLE_GLOBAL_CHANNEL and GLOBAL_CHANNEL_ID:
-                    try:
-                        await self._upload_by_type(
-                            client, msg_type, file_path, int(GLOBAL_CHANNEL_ID),
-                            None, caption, thumb_path, msg, None
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to upload to global channel: {e}")
-                
-                logger.debug(f"Upload completed: {os.path.basename(file_path)} ({upload_time:.2f}s)")
+                logger.info(f"✅ Upload succeeded to target_chat {target_chat}! (sent_msg_id={getattr(sent_msg, 'id', None)}, time={upload_time:.2f}s)")
                 
                 return DownloadResult(
                     success=True,
@@ -137,6 +128,7 @@ class UploadService:
                     upload_time=upload_time
                 )
             else:
+                logger.error(f"❌ Upload failed: no message returned from upload method for target_chat {target_chat}")
                 return DownloadResult(
                     success=False,
                     error="Upload failed - no response",
@@ -169,7 +161,7 @@ class UploadService:
         self, client, msg_type, file_path, chat_id,
         reply_to_id, caption, thumb_path, original_msg, progress
     ):
-        """Upload file based on message type"""
+        """Upload file based on message type with robust fallbacks"""
         
         upload_methods = {
             "Document": client.send_document,
@@ -179,12 +171,10 @@ class UploadService:
             "Animation": client.send_animation,
             "Voice": client.send_voice,
             "Sticker": client.send_sticker,
+            "VideoNote": getattr(client, "send_video_note", client.send_video),
         }
         
-        if msg_type not in upload_methods:
-            return None
-        
-        method = upload_methods[msg_type]
+        method = upload_methods.get(msg_type, client.send_document)
         
         # Common parameters
         kwargs = {
@@ -205,6 +195,17 @@ class UploadService:
                 kwargs["duration"] = original_msg.video.duration
                 kwargs["width"] = original_msg.video.width
                 kwargs["height"] = original_msg.video.height
+        elif msg_type == "VideoNote":
+            if hasattr(client, "send_video_note"):
+                kwargs = {
+                    "chat_id": chat_id,
+                    "video_note": file_path,
+                    "reply_to_message_id": reply_to_id,
+                }
+                if thumb_path:
+                    kwargs["thumb"] = thumb_path
+            else:
+                kwargs["video"] = file_path
         elif msg_type == "Photo":
             kwargs["photo"] = file_path
         elif msg_type == "Audio":
@@ -222,6 +223,9 @@ class UploadService:
             kwargs["duration"] = getattr(original_msg.voice, 'duration', 0)
         elif msg_type == "Sticker":
             kwargs["sticker"] = file_path
+        else:
+            kwargs["document"] = file_path
+            kwargs["thumb"] = thumb_path
         
         # Add progress callback
         if progress:
@@ -229,12 +233,44 @@ class UploadService:
         
         try:
             return await method(**kwargs)
-        except WebpageCurlFailed:
-            # Retry without thumbnail if it fails
+        except Exception as first_err:
+            logger.warning(f"Upload attempt with {msg_type} failed ({first_err}). Trying fallback strategies...")
+            
+            # 1. Retry without thumb if thumb was included
             if "thumb" in kwargs:
                 kwargs.pop("thumb")
-                return await method(**kwargs)
-            raise
+                try:
+                    return await method(**kwargs)
+                except Exception:
+                    pass
+            
+            # 2. Fix caption issues (truncate / disable HTML parse mode)
+            if "caption" in kwargs and kwargs["caption"]:
+                kwargs["caption"] = kwargs["caption"][:1020]
+                kwargs["parse_mode"] = None
+                try:
+                    return await method(**kwargs)
+                except Exception:
+                    kwargs.pop("caption", None)
+            
+            # 3. Ultimate fallback: Send as Document
+            if msg_type != "Document":
+                try:
+                    doc_kwargs = {
+                        "chat_id": chat_id,
+                        "document": file_path,
+                        "reply_to_message_id": reply_to_id,
+                    }
+                    if "caption" in kwargs and kwargs["caption"]:
+                        doc_kwargs["caption"] = kwargs["caption"][:1020]
+                    if progress:
+                        doc_kwargs["progress"] = progress
+                    logger.info(f"Falling back to send_document for {file_path}")
+                    return await client.send_document(**doc_kwargs)
+                except Exception as doc_err:
+                    logger.error(f"Fallback send_document also failed: {doc_err}")
+            
+            raise first_err
     
     async def get_user_caption(self, user_id: int, original_caption: str = None) -> Optional[str]:
         """Get caption from user settings or use original"""

@@ -11,7 +11,9 @@ import logging
 import signal
 from datetime import datetime
 import plugins.handlers 
+import pyrogram
 from pyrogram import Client, enums
+from pyrogram.errors import FloodWait
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +48,7 @@ class SaveRestrictedBot(Client):
             sleep_threshold=SLEEP_THRESHOLD,
             max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
             ipv6=False,
-            in_memory=True,
+            in_memory=False,
             parse_mode=enums.ParseMode.MARKDOWN
         )
 
@@ -64,8 +66,14 @@ class SaveRestrictedBot(Client):
             await init_db()
             logger.info("✅ MongoDB connected successfully")
             
-            # Start the client
-            await super().start()
+            # Start the client with FloodWait retry
+            while True:
+                try:
+                    await super().start()
+                    break
+                except pyrogram.errors.FloodWait as fw:
+                    logger.warning(f"Telegram FloodWait on start: waiting {fw.value}s...")
+                    await asyncio.sleep(fw.value + 5)
             
             # Get bot info
             self.me = await self.get_me()
