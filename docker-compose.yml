@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: telegram_downloader_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - mongodb
+    volumes:
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      # Mount a sessions directory to persist login states (Pyrogram session files)
+      - ./sessions:/app/sessions
+    environment:
+      # Override localhost with the service name for Docker networking
+      - MONGODB_URI=mongodb://mongodb:27017
+
+  mongodb:
+    image: mongo:4.4
+    container_name: telegram_downloader_db
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data:

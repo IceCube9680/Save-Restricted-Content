@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+ENV/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.sample
+
+# Telegram session files
+*.session
+*.session-journal
+sessions/
+
+# Temporary directories & downloads
+temp/
+downloads/
+thumbnails/
+backups/
+
+# Logs
+logs/
+*.log
+
+# Deployment & Service scripts excluded
+saverestricted.service
+saverestricted.sh
+
+# OS & Editor files
+.DS_Store
+.idea/
+.vscode/
